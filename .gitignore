@@ -1,0 +1,39 @@
+# ----------------------------
+# Python
+# ----------------------------
+__pycache__/
+*.py[cod]
+
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+
+# ----------------------------
+# ML Models
+# ----------------------------
+*.h5
+*.keras
+*.weights.h5
+*.pt
+*.pth
+*.ckpt
+
+# ----------------------------
+# Dataset (optional)
+# ----------------------------
+data/
+datasets/
+
+# Logs
+*.log
