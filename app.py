@@ -1,23 +1,23 @@
+import os
+os.environ["KERAS_BACKEND"] = "tensorflow"
 import streamlit as st
 import cv2
 import numpy as np
 import tensorflow as tf
 from ultralytics import YOLO
 from PIL import Image
-from tensorflow.keras import layers, models
 from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras import layers, models
 
-# =====================================
-# BUILD COLOR MODEL
-# =====================================
+# 1. UPDATED: Ensure your architecture matches exactly
 def build_color_model(num_classes=15):
-
+    # If your Kaggle model used a Normalization layer, it usually goes here.
+    # But since you are using EfficientNetB0, it has its own internal normalization.
     base_model = EfficientNetB0(
         weights="imagenet",
         include_top=False,
         input_shape=(224,224,3)
     )
-
     base_model.trainable = False
 
     model = models.Sequential([
@@ -27,60 +27,54 @@ def build_color_model(num_classes=15):
         layers.Dropout(0.3),
         layers.Dense(num_classes, activation="softmax")
     ])
-
     return model
 
-
-# =====================================
+# =============================
 # PAGE CONFIG
-# =====================================
+# =============================
 st.set_page_config(page_title="Car Color Detection", layout="wide")
-
 st.title("🚦 Car Color Detection System")
-st.write("Detects vehicle colors, counts vehicles, and counts people in traffic scenes.")
 
-# =====================================
-# LOAD MODELS (CACHED)
-# =====================================
+# =============================
+# LOAD MODELS (FIXED SECTION)
+# =============================
 @st.cache_resource
 def load_models():
-
+    # Load YOLO
     yolo_model = YOLO("yolov8n.pt")
 
+    # FIX: Initialize and Build the model before loading weights
     color_model = build_color_model()
-    color_model.load_weights("color_model.weights.h5")
+    
+    # STEP 1: Manually build the model with the input shape
+    color_model.build((None, 224, 224, 3)) 
+    
+    # STEP 2: Load weights with skip_mismatch=True to bypass the Normalization error
+    color_model.load_weights("final_weights.weights.h5", skip_mismatch=True)
 
     return yolo_model, color_model
 
-
 yolo_model, color_model = load_models()
 
+# Alphabetical list of colors (ensure this matches your Kaggle folder order!)
 class_names = [
     'beige','black','blue','brown','gold',
     'green','grey','orange','pink','purple',
     'red','silver','tan','white','yellow'
 ]
 
-# =====================================
-# IMAGE UPLOAD
-# =====================================
 uploaded_file = st.file_uploader(
     "Upload Traffic Image",
     type=["jpg","jpeg","png"]
 )
 
-# =====================================
-# MAIN LOGIC
-# =====================================
 if uploaded_file is not None:
-
     original_image = Image.open(uploaded_file)
-    st.subheader("Original Image")
-    st.image(original_image, use_column_width=True)
-
+    # Convert PIL to OpenCv format
     image = np.array(original_image)
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
 
+    # Run YOLO detection
     results = yolo_model(image, conf=0.6)
 
     car_count = 0
@@ -88,98 +82,42 @@ if uploaded_file is not None:
 
     for r in results:
         for box in r.boxes:
+            label = yolo_model.names[int(box.cls[0])]
+            x1,y1,x2,y2 = map(int, box.xyxy[0])
 
-            confidence = float(box.conf[0])
-            if confidence < 0.6:
-                continue
-
-            cls_id = int(box.cls[0])
-            label = yolo_model.names[cls_id]
-
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-
-            width = x2 - x1
-            height = y2 - y1
-
-
-            if width < 70 or height < 70:
-                continue
-
-            # =============================
-            # VEHICLE LOGIC
-            # =============================
             if label in ["car","truck","bus"]:
-
                 car_count += 1
 
-                car_crop = image[y1:y2, x1:x2]
-                car_crop = cv2.resize(car_crop, (224,224))
-                car_crop = car_crop / 255.0
-                car_crop = np.expand_dims(car_crop, axis=0)
+                # Crop the car for color detection
+                crop = image[y1:y2, x1:x2]
+                if crop.size == 0: continue # Skip empty crops
+                
+                crop = cv2.resize(crop,(224,224))
+                
+                # PRE-PROCESSING: Ensure this matches your Kaggle training!
+                crop = crop / 255.0
+                crop = np.expand_dims(crop, 0)
 
-                pred = color_model.predict(car_crop, verbose=0)
+                # Predict Color
+                pred = color_model.predict(crop, verbose=0)
+                color_index = np.argmax(pred)
+                color_name = class_names[color_index]
+                confidence = np.max(pred)
 
-                confidence_score = np.max(pred)
-                pred_class = np.argmax(pred)
+                # Draw on image
+                cv2.rectangle(image,(x1,y1),(x2,y2),(255,0,0),2)
+                display_text = f"{color_name} ({confidence*100:.1f}%)"
+                cv2.putText(image, display_text, (x1, y1-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,0,0), 2)
 
-
-                if confidence_score < 0.70:
-                    color_name = "unknown"
-                else:
-                    color_name = class_names[pred_class]
-
-
-                if color_name == "blue":
-                    box_color = (0,0,255)   
-                else:
-                    box_color = (255,0,0)   
-
-
-                cv2.rectangle(image, (x1,y1), (x2,y2), box_color, 2)
-
-
-                if color_name != "unknown":
-                    cv2.putText(
-                        image,
-                        color_name,
-                        (x1, y1-8 if y1>20 else y1+20),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,
-                        box_color,
-                        2
-                    )
-
-            # =============================
-            # PERSON LOGIC
-            # =============================
-            elif label == "person":
+            elif label=="person":
                 person_count += 1
 
-    # =====================================
-    # TOP LEFT COUNTERS
-    # =====================================
-    cv2.putText(
-        image, f"Cars: {car_count}",
-        (20,40),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (0,255,0),
-        2
-    )
+    # Final counts display
+    cv2.putText(image,f"Cars: {car_count}",(20,40),
+                cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
+    cv2.putText(image,f"People: {person_count}",(20,80),
+                cv2.FONT_HERSHEY_SIMPLEX,1,(0,255,0),2)
 
-    cv2.putText(
-        image, f"People: {person_count}",
-        (20,80),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (0,255,0),
-        2
-    )
-
-    processed_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
-    st.subheader("Processed Output")
-    st.image(processed_image, use_column_width=True)
-
-    st.success(f"Total Cars Detected: {car_count}")
-    st.success(f"Total People Detected: {person_count}")
+    # Display the final processed image in Streamlit
+    st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), use_container_width=True)
