@@ -1,7 +1,6 @@
 streamlit
-tensorflow==2.15.0
-keras==2.15.0
-numpy==1.26.4
-opencv-python-headless==4.8.1.78
+tensorflow==2.20.0
 ultralytics
+opencv-python-headless
 pillow
+numpy
