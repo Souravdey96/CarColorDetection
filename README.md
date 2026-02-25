@@ -1,4 +1,3 @@
-# CarColorDetection
 # 🚗 Car Color Detection & Traffic Analytics System
 
 An end-to-end Computer Vision system that detects vehicles in traffic, predicts their colors, draws rule-based bounding boxes, and counts both vehicles and people.
